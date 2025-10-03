@@ -1,0 +1,166 @@
+# DEX/CEX Arbitrage Bot - Git Ignore File
+
+# ==========================================
+# Environment and Secrets
+# ==========================================
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+credentials.json
+secrets/
+
+# ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ==========================================
+# Virtual Environments
+# ==========================================
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ==========================================
+# IDE and Editors
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# ==========================================
+# Logs and Data
+# ==========================================
+logs/
+*.log
+*.log.*
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ==========================================
+# Trading Data (Sensitive)
+# ==========================================
+historical_data/
+backtest_results/
+trade_history/
+order_data/
+*.csv
+*.parquet
+
+# ==========================================
+# Jupyter Notebooks
+# ==========================================
+.ipynb_checkpoints/
+*.ipynb
+
+# ==========================================
+# Testing
+# ==========================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ==========================================
+# Documentation
+# ==========================================
+docs/_build/
+site/
+
+# ==========================================
+# OS Generated
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==========================================
+# Backup Files
+# ==========================================
+*.bak
+*.backup
+*.old
+*~
+
+# ==========================================
+# Compiled Files
+# ==========================================
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# ==========================================
+# Package Files
+# ==========================================
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# ==========================================
+# Temporary Files
+# ==========================================
+tmp/
+temp/
+*.tmp
+*.temp
+
+# ==========================================
+# Configuration (if contains secrets)
+# ==========================================
+# Uncomment if config.yaml contains sensitive data
+# config.yaml
+# config.local.yaml
+
+# ==========================================
+# Keep These (Examples & Templates)
+# ==========================================
+!.env.example
+!config.yaml.template
+!README.md
+!requirements.txt

@@ -1,0 +1,105 @@
+
+# LANDSHARE Market Maker Bot Configuration
+
+# Strategy Type
+strategy: "landshare_market_maker"
+
+# LANDSHARE Token Configuration
+token:
+  symbol: "LAND"
+  trading_pair: "LAND/USDT"
+  contract_address: "0x9d986A3f147212327DD658F712d5264a73a1fdB0"
+  blockchain: "BSC"
+
+# DEX Configuration (PancakeSwap)
+dex:
+  name: "pancakeswap"
+  api_url: "https://api.pancakeswap.info/api/v2"
+  websocket_url: "wss://bsc-ws-node.nariox.org:443"
+  pair: "LAND/WBNB"
+
+# CEX Configuration
+cex:
+  available_exchanges:
+    - "mexc"
+    - "gateio"
+    - "bitmart"
+    - "ascendex"
+    - "bingx"
+  selected_exchange: "mexc"
+
+# API Credentials (set these in environment variables or here)
+api_credentials:
+  mexc_api_key: ""
+  mexc_secret: ""
+  gateio_api_key: ""
+  gateio_secret: ""
+  gateio_password: ""
+  bitmart_api_key: ""
+  bitmart_secret: ""
+  bitmart_uid: ""
+  bitmart_memo: ""
+  ascendex_api_key: ""
+  ascendex_secret: ""
+  ascendex_group_id: ""
+  bingx_api_key: ""
+  bingx_secret: ""
+
+# Reference Price Mode
+reference_mode:
+  use_dex_reference: true  # true = DEX reference, false = CEX reference
+  sync_interval: 60        # Sync every 60 seconds (1 minute)
+
+# Market Making Parameters
+market_making:
+  spread_percentage: 1.5    # Spread around reference price (%)
+  order_amount_usd: 1000    # Total order amount in USD ($500 per side)
+  order_count: 1            # Number of orders per side (1 buy + 1 sell)
+  post_only: true           # Use post-only orders (maker-only)
+  refresh_interval: 60      # Refresh orders every 60 seconds
+
+# Fill Handling
+fill_handling:
+  dex_mode_delay: 0         # Immediate rebalance in DEX mode
+  cex_mode_delay: 120       # 2-minute delay in CEX mode
+  immediate_rebalance: true # Rebalance immediately on fill (DEX mode)
+
+# Risk Management
+risk_management:
+  max_inventory_skew: 0.3   # Maximum 30% inventory imbalance
+  max_position_usd: 5000    # Maximum position size in USD
+  max_daily_trades: 200     # Maximum trades per day
+  max_price_divergence: 0.05 # Maximum 5% price divergence between DEX/CEX
+  circuit_breaker:
+    enabled: true
+    price_change_threshold: 0.10  # 10% price change
+    pause_duration: 300     # 5 minutes pause
+
+# Position Sizing
+position_sizing:
+  min_order_usd: 10         # Minimum order size in USD
+  max_order_usd: 2000       # Maximum order size in USD
+  inventory_skew_adjustment: true  # Adjust quotes based on inventory
+
+# Fee Configuration
+fees:
+  maker_fee: 0.001          # 0.1% maker fee
+  taker_fee: 0.002          # 0.2% taker fee
+  estimate_slippage: 0.001  # 0.1% estimated slippage
+
+# System Settings
+system:
+  sandbox_mode: true        # Use sandbox/paper trading
+  log_level: "INFO"         # Logging level
+  data_retention_days: 30   # Days to keep historical data
+  enable_websocket: true    # Enable WebSocket for real-time data
+  connection_timeout: 30    # API connection timeout in seconds
+
+# Logging Configuration
+logging:
+  enable_order_logs: true
+  enable_price_logs: true
+  enable_fill_logs: true
+  enable_performance_logs: true
+  log_to_file: true
+  log_directory: "logs"
