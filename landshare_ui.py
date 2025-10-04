@@ -10,7 +10,8 @@ import asyncio
 import logging
 from datetime import datetime
 from landshare_token_manager import LANDTokenManager
-from landshare_market_maker import MultiCEXManager
+from landshare_market_maker import MultiCEXManager, ReferencePriceEngine, MarketMakerEngine
+import threading
 
 # Page configuration
 st.set_page_config(
@@ -63,6 +64,14 @@ if 'dynamic_interval' not in st.session_state:
     st.session_state.dynamic_interval = 60
 if 'price_fetch_interval' not in st.session_state:
     st.session_state.price_fetch_interval = 5  # Always fetch prices every 5 seconds
+if 'active_orders' not in st.session_state:
+    st.session_state.active_orders = []
+if 'market_maker_instance' not in st.session_state:
+    st.session_state.market_maker_instance = None
+if 'bot_logs' not in st.session_state:
+    st.session_state.bot_logs = []
+if 'api_credentials' not in st.session_state:
+    st.session_state.api_credentials = {}
 
 # Helper function to fetch prices (works without credentials)
 async def fetch_dex_price():
@@ -147,6 +156,151 @@ def calculate_dynamic_interval(current_price, last_price, spread_pct):
     else:
         return 60  # Normal refresh
 
+def add_log(message):
+    """Add a log message to the session state"""
+    timestamp = datetime.now().strftime('%H:%M:%S')
+    log_entry = f"[{timestamp}] {message}"
+    st.session_state.bot_logs.append(log_entry)
+    # Keep only last 50 logs
+    if len(st.session_state.bot_logs) > 50:
+        st.session_state.bot_logs = st.session_state.bot_logs[-50:]
+
+def create_bot_config():
+    """Create configuration dict from session state and credentials"""
+    config = {
+        'token': {
+            'symbol': 'LAND',
+            'trading_pair': 'LAND/USDT',
+            'contract_address': '0x9d986A3f147212327DD658F712d5264a73a1fdB0',
+            'blockchain': 'BSC'
+        },
+        'dex': {
+            'name': 'pancakeswap',
+            'api_url': 'https://api.pancakeswap.info/api/v2',
+            'websocket_url': 'wss://bsc-ws-node.nariox.org:443',
+            'pair': 'LAND/WBNB'
+        },
+        'cex': {
+            'selected_exchange': st.session_state.bot_config['selected_exchange']
+        },
+        'api_credentials': st.session_state.api_credentials,
+        'reference_mode': {
+            'use_dex_reference': st.session_state.bot_config['reference_mode'] == 'dex',
+            'sync_interval': 60
+        },
+        'market_making': {
+            'spread_percentage': st.session_state.bot_config['spread_percentage'],
+            'order_amount_usd': st.session_state.bot_config['order_amount_usd'],
+            'order_count': 1,
+            'post_only': True,
+            'refresh_interval': st.session_state.dynamic_interval
+        },
+        'fill_handling': {
+            'dex_mode_delay': 0,
+            'cex_mode_delay': 120,
+            'immediate_rebalance': True
+        },
+        'risk_management': {
+            'max_inventory_skew': 0.3,
+            'max_position_usd': 5000,
+            'max_daily_trades': 200
+        },
+        'system': {
+            'log_level': 'INFO'
+        }
+    }
+    return config
+
+async def run_bot_cycle():
+    """Run a single bot cycle - place orders and check fills"""
+    try:
+        if not st.session_state.market_maker_instance:
+            return
+
+        market_maker = st.session_state.market_maker_instance
+
+        # Place spread orders
+        add_log("Placing spread orders...")
+        success = await market_maker.place_spread_orders()
+
+        if success:
+            # Fetch active orders from exchange
+            exchange = market_maker.cex_manager.exchanges[market_maker.cex_manager.selected_exchange]
+            open_orders = await exchange.fetch_open_orders('LAND/USDT')
+
+            # Store active orders in session state
+            st.session_state.active_orders = open_orders
+            add_log(f"✅ Successfully placed {len(open_orders)} orders")
+
+            # Check for fills
+            fills = await market_maker.check_fills()
+
+            if fills:
+                for fill in fills:
+                    add_log(f"🎯 Order filled: {fill['side'].upper()} {fill['filled_amount']:.2f} @ ${fill['filled_price']:.6f}")
+                    await market_maker.fill_handler.handle_fill(fill)
+        else:
+            add_log("❌ Failed to place orders")
+
+    except Exception as e:
+        add_log(f"❌ Error in bot cycle: {str(e)}")
+        logging.error(f"Bot cycle error: {e}", exc_info=True)
+
+async def initialize_bot():
+    """Initialize the bot components"""
+    try:
+        add_log("🚀 Initializing bot components...")
+
+        # Create config
+        config = create_bot_config()
+
+        # Initialize managers
+        land_manager = LANDTokenManager(config)
+        cex_manager = MultiCEXManager(config)
+
+        await land_manager.initialize()
+        await cex_manager.initialize()
+
+        add_log(f"✅ Connected to {config['cex']['selected_exchange'].upper()}")
+
+        # Create engines
+        reference_engine = ReferencePriceEngine(config, land_manager, cex_manager)
+        market_maker = MarketMakerEngine(config, reference_engine, cex_manager)
+
+        # Store in session state
+        st.session_state.market_maker_instance = market_maker
+
+        add_log("✅ Bot initialized successfully")
+        return True
+
+    except Exception as e:
+        add_log(f"❌ Failed to initialize bot: {str(e)}")
+        logging.error(f"Bot initialization error: {e}", exc_info=True)
+        return False
+
+async def shutdown_bot():
+    """Shutdown the bot and close connections"""
+    try:
+        if st.session_state.market_maker_instance:
+            market_maker = st.session_state.market_maker_instance
+
+            # Cancel all orders
+            add_log("Cancelling all open orders...")
+            cancelled = await market_maker.cex_manager.cancel_all_orders('LAND/USDT')
+            add_log(f"✅ Cancelled {cancelled} orders")
+
+            # Close connections
+            await market_maker.reference_engine.land_manager.close()
+            await market_maker.cex_manager.close()
+
+            st.session_state.market_maker_instance = None
+            st.session_state.active_orders = []
+            add_log("✅ Bot shutdown complete")
+
+    except Exception as e:
+        add_log(f"❌ Error shutting down bot: {str(e)}")
+        logging.error(f"Bot shutdown error: {e}", exc_info=True)
+
 # Title and description
 st.title("LANDSHARE Market Maker Bot")
 st.markdown("Automated market making for LAND/USDT with dual reference price modes")
@@ -188,26 +342,45 @@ with col1:
         if selected_exchange == 'mexc':
             api_key = st.text_input("MEXC API Key", type="password", key="mexc_key")
             api_secret = st.text_input("MEXC API Secret", type="password", key="mexc_secret")
+            # Store credentials
+            st.session_state.api_credentials['mexc_api_key'] = api_key
+            st.session_state.api_credentials['mexc_secret'] = api_secret
 
         elif selected_exchange == 'gateio':
             api_key = st.text_input("Gate.io API Key", type="password", key="gateio_key")
             api_secret = st.text_input("Gate.io API Secret", type="password", key="gateio_secret")
             api_password = st.text_input("Gate.io API Password", type="password", key="gateio_pass")
+            # Store credentials
+            st.session_state.api_credentials['gateio_api_key'] = api_key
+            st.session_state.api_credentials['gateio_secret'] = api_secret
+            st.session_state.api_credentials['gateio_password'] = api_password
 
         elif selected_exchange == 'bitmart':
             api_key = st.text_input("BitMart API Key", type="password", key="bitmart_key")
             api_secret = st.text_input("BitMart API Secret", type="password", key="bitmart_secret")
             api_uid = st.text_input("BitMart UID", key="bitmart_uid")
             api_memo = st.text_input("BitMart Memo", type="password", key="bitmart_memo", help="Required for BitMart API authentication")
+            # Store credentials
+            st.session_state.api_credentials['bitmart_api_key'] = api_key
+            st.session_state.api_credentials['bitmart_secret'] = api_secret
+            st.session_state.api_credentials['bitmart_uid'] = api_uid
+            st.session_state.api_credentials['bitmart_memo'] = api_memo
 
         elif selected_exchange == 'ascendex':
             api_key = st.text_input("AscendEX API Key", type="password", key="ascendex_key")
             api_secret = st.text_input("AscendEX API Secret", type="password", key="ascendex_secret")
             api_group_id = st.text_input("AscendEX Group ID", key="ascendex_group_id", help="Required for AscendEX API authentication")
+            # Store credentials
+            st.session_state.api_credentials['ascendex_api_key'] = api_key
+            st.session_state.api_credentials['ascendex_secret'] = api_secret
+            st.session_state.api_credentials['ascendex_group_id'] = api_group_id
 
         elif selected_exchange == 'bingx':
             api_key = st.text_input("BingX API Key", type="password", key="bingx_key")
             api_secret = st.text_input("BingX API Secret", type="password", key="bingx_secret")
+            # Store credentials
+            st.session_state.api_credentials['bingx_api_key'] = api_key
+            st.session_state.api_credentials['bingx_secret'] = api_secret
 
     # Trading Parameters
     st.markdown("### Trading Parameters")
@@ -263,12 +436,27 @@ with col1:
             if not credentials_valid:
                 st.error(f"Please provide all required {selected_exchange.upper()} API credentials")
             else:
-                st.session_state.bot_running = True
-                st.success("Bot started successfully!")
-                st.rerun()
+                # Initialize bot
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                success = loop.run_until_complete(initialize_bot())
+                loop.close()
+
+                if success:
+                    st.session_state.bot_running = True
+                    st.success("Bot started successfully!")
+                    st.rerun()
+                else:
+                    st.error("Failed to start bot. Check logs for details.")
 
     with col_stop:
         if st.button("Stop Bot", type="secondary", disabled=not st.session_state.bot_running):
+            # Shutdown bot
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(shutdown_bot())
+            loop.close()
+
             st.session_state.bot_running = False
             st.info("Bot stopped")
             st.rerun()
@@ -378,32 +566,31 @@ st.markdown("---")
 st.subheader("📊 Active Orders")
 
 if st.session_state.bot_running:
-    reference_price = st.session_state.dex_price if reference_mode == 'dex' else st.session_state.cex_price
+    # Run bot cycle if bot is running
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(run_bot_cycle())
+    loop.close()
 
-    if reference_price:
-        spread = spread_pct / 100
-        buy_price = reference_price * (1 - spread)
-        sell_price = reference_price * (1 + spread)
-
-        # Calculate order sizes
-        buy_size = (order_amount / 2) / buy_price
-        sell_size = (order_amount / 2) / sell_price
-
-        orders_data = {
-            'Order ID': ['BUY_LAND_001', 'SELL_LAND_001'],
-            'Side': ['BUY', 'SELL'],
-            'Price': [f"${buy_price:.6f}", f"${sell_price:.6f}"],
-            'Amount': [f"{buy_size:.2f} LAND", f"{sell_size:.2f} LAND"],
-            'Value': [f"${order_amount/2:.2f}", f"${order_amount/2:.2f}"],
-            'Status': ['Open', 'Open'],
-            'Exchange': [selected_exchange.upper(), selected_exchange.upper()],
-            'Time': [datetime.now().strftime('%H:%M:%S')] * 2
-        }
+    # Display real orders from exchange
+    if st.session_state.active_orders:
+        orders_data = []
+        for order in st.session_state.active_orders:
+            orders_data.append({
+                'Order ID': order.get('id', 'N/A'),
+                'Side': order.get('side', 'N/A').upper(),
+                'Price': f"${order.get('price', 0):.6f}",
+                'Amount': f"{order.get('amount', 0):.2f} LAND",
+                'Filled': f"{order.get('filled', 0):.2f}",
+                'Status': order.get('status', 'N/A').upper(),
+                'Exchange': selected_exchange.upper(),
+                'Time': datetime.fromtimestamp(order.get('timestamp', 0) / 1000).strftime('%H:%M:%S') if order.get('timestamp') else 'N/A'
+            })
 
         df_orders = pd.DataFrame(orders_data)
         st.dataframe(df_orders, use_container_width=True, hide_index=True)
     else:
-        st.warning("Waiting for price data...")
+        st.warning("No active orders. Waiting for next cycle...")
 
 else:
     st.info("📌 Start the bot to place orders. Prices are shown above for monitoring.")
@@ -412,34 +599,17 @@ else:
 st.markdown("---")
 st.subheader("📝 Bot Logs")
 
-if st.session_state.bot_running:
-    mode_name = "DEX" if reference_mode == 'dex' else "CEX"
-    reference_price = st.session_state.dex_price if reference_mode == 'dex' else st.session_state.cex_price
-
-    if reference_price:
-        spread = spread_pct / 100
-        buy_price = reference_price * (1 - spread)
-        sell_price = reference_price * (1 + spread)
-
-        sample_logs = [
-            f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Bot started in {mode_name} reference mode",
-            f"[{datetime.now().strftime('%H:%M:%S')}] 🔗 Connected to {selected_exchange.upper()} exchange",
-            f"[{datetime.now().strftime('%H:%M:%S')}] 💹 DEX price: ${st.session_state.dex_price:.6f}",
-            f"[{datetime.now().strftime('%H:%M:%S')}] 💹 CEX price: ${st.session_state.cex_price:.6f}" if st.session_state.cex_price else f"[{datetime.now().strftime('%H:%M:%S')}] 💹 CEX price: N/A",
-            f"[{datetime.now().strftime('%H:%M:%S')}] 📌 Reference price ({mode_name}): ${reference_price:.6f}",
-            f"[{datetime.now().strftime('%H:%M:%S')}] 🟢 Placed BUY order @ ${buy_price:.6f}",
-            f"[{datetime.now().strftime('%H:%M:%S')}] 🔴 Placed SELL order @ ${sell_price:.6f}",
-            f"[{datetime.now().strftime('%H:%M:%S')}] ⏱️  Refresh interval: {st.session_state.dynamic_interval}s",
-            f"[{datetime.now().strftime('%H:%M:%S')}] 👀 Monitoring for fills...",
-        ]
-
-        for log in sample_logs:
+if st.session_state.bot_logs:
+    # Display logs in reverse chronological order (newest first)
+    log_container = st.container()
+    with log_container:
+        for log in reversed(st.session_state.bot_logs[-20:]):  # Show last 20 logs
             st.text(log)
-    else:
-        st.text(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting for price data...")
-
 else:
-    st.info("💡 Prices are fetched live every 5 seconds. Start the bot to begin trading.")
+    if st.session_state.bot_running:
+        st.info("Waiting for bot activity...")
+    else:
+        st.info("💡 Prices are fetched live every 5 seconds. Start the bot to begin trading.")
 
 # Footer
 st.markdown("---")
