@@ -537,23 +537,30 @@ with st.spinner("Fetching prices..."):
         st.session_state.dex_price = dex_price
     loop.close()
 
+# Get CEX price for selected exchange
+cex_price = None
+if st.session_state.bot_config['selected_exchange']:
+    cex_price = st.session_state.cex_prices.get(st.session_state.bot_config['selected_exchange'])
+
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("DEX Price", f"${st.session_state.dex_price:.6f}" if st.session_state.dex_price else "N/A")
 with col2:
-    if st.session_state.bot_config['selected_exchange']:
-        cex_price = st.session_state.cex_prices.get(st.session_state.bot_config['selected_exchange'])
-        st.metric("CEX Price", f"${cex_price:.6f}" if cex_price else "N/A")
+    st.metric("CEX Price", f"${cex_price:.6f}" if cex_price else "N/A")
 with col3:
     if st.session_state.dex_price and cex_price:
         div = abs(st.session_state.dex_price - cex_price) / st.session_state.dex_price
         st.metric("Divergence", f"{div:.2%}")
+    else:
+        st.metric("Divergence", "N/A")
 with col4:
     ref_price = st.session_state.dex_price if ref_mode == 'dex' else cex_price
     if ref_price:
         buy_p = ref_price * (1 - spread / 100)
         sell_p = ref_price * (1 + spread / 100)
         st.metric("Order Range", f"${buy_p:.6f} - ${sell_p:.6f}")
+    else:
+        st.metric("Order Range", "N/A")
 
 # Active Orders
 st.markdown("#### 📊 Active Orders")
