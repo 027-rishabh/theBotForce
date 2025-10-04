@@ -1,6 +1,6 @@
 """
 LANDSHARE Market Maker Bot - Final UI
-Single-page layout with authentication, all 5 exchanges, and public CEX data
+Single-page layout with enhanced UX and all exchange support
 """
 
 import streamlit as st
@@ -8,7 +8,6 @@ import pandas as pd
 import asyncio
 import logging
 import json
-import hashlib
 from datetime import datetime
 from pathlib import Path
 from landshare_token_manager import LANDTokenManager
@@ -27,21 +26,45 @@ st.markdown("""
 <style>
     .stButton>button {
         width: 100%;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
     .section-header {
-        background: linear-gradient(90deg, #1f77b4 0%, #0ea5e9 100%);
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 10px 15px;
-        border-radius: 5px;
-        margin: 15px 0 10px 0;
-        font-weight: bold;
-    }
-    .cex-card {
-        background-color: #f0f9ff;
-        padding: 15px;
+        padding: 12px 20px;
         border-radius: 8px;
-        border-left: 4px solid #0ea5e9;
+        margin: 20px 0 15px 0;
+        font-weight: 600;
+        font-size: 1.1em;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .price-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 5px solid #667eea;
         margin: 10px 0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .exchange-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.85em;
+        font-weight: 600;
+        margin: 2px;
+    }
+    .badge-connected {
+        background-color: #10b981;
+        color: white;
+    }
+    .badge-available {
+        background-color: #f3f4f6;
+        color: #6b7280;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -92,21 +115,24 @@ if 'username' not in st.session_state:
 
 # Login
 if not st.session_state.authenticated:
-    st.title("🔐 LANDSHARE Market Maker - Login")
+    st.markdown("<h1 style='text-align: center;'>🔐 LANDSHARE Market Maker</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
+        st.markdown("<div style='background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>", unsafe_allow_html=True)
         with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submit = st.form_submit_button("Login", use_container_width=True)
+            st.markdown("### Please Login")
+            username = st.text_input("Username", placeholder="Enter username")
+            password = st.text_input("Password", type="password", placeholder="Enter password")
+            submit = st.form_submit_button("🚀 Login", use_container_width=True)
             if submit:
                 if verify_login(username, password):
                     st.session_state.authenticated = True
                     st.session_state.username = username
-                    st.success("Login successful!")
+                    st.success("✅ Login successful!")
                     st.rerun()
                 else:
-                    st.error("Invalid credentials")
+                    st.error("❌ Invalid credentials")
+        st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 # Initialize session after authentication
@@ -156,7 +182,8 @@ async def fetch_cex_price(exchange_name, trading_pair='LAND/USDT'):
         exchange = exchange_class({'enableRateLimit': True})
         await exchange.load_markets()
 
-        pairs_to_try = [trading_pair, 'LANDSHARE/USDT', 'LAND/USD']
+        # Try different pair formats
+        pairs_to_try = [trading_pair, 'LANDSHARE/USDT', 'LAND/USD', 'LAND/USDC']
         ticker = None
 
         for pair in pairs_to_try:
@@ -168,6 +195,7 @@ async def fetch_cex_price(exchange_name, trading_pair='LAND/USDT'):
         await exchange.close()
         return cex_price
     except Exception as e:
+        logging.error(f"{exchange_name} price error: {e}")
         return None
 
 async def fetch_portfolio(exchange_name, credentials):
@@ -219,7 +247,6 @@ def add_log(message):
 def create_bot_config():
     exchange_name = st.session_state.bot_config['selected_exchange']
     credentials = load_cex_credentials(exchange_name)
-
     trading_pair = 'LANDSHARE/USDT' if exchange_name == 'gateio' else 'LAND/USDT'
 
     config = {
@@ -319,30 +346,44 @@ async def shutdown_bot():
 # Sidebar
 with st.sidebar:
     st.markdown(f"### 👤 {st.session_state.username}")
-    if st.button("Logout", use_container_width=True):
+    if st.button("🚪 Logout", use_container_width=True):
         st.session_state.authenticated = False
         st.rerun()
 
     st.markdown("---")
+
     if st.session_state.bot_running:
-        st.success("🟢 Bot Running")
+        st.success("🟢 **Bot Active**")
     else:
-        st.error("🔴 Bot Stopped")
+        st.error("🔴 **Bot Stopped**")
+
+    st.markdown("---")
+    st.markdown("### 📊 Quick Stats")
 
     if st.session_state.dex_price:
         st.metric("DEX Price", f"${st.session_state.dex_price:.6f}")
 
+    saved = get_all_saved_exchanges()
+    if saved:
+        st.metric("Connected CEX", len(saved))
+
 # Main content
-st.title("LANDSHARE Market Maker Bot")
-st.markdown("Automated market making with multi-exchange support")
+st.title("📈 LANDSHARE Market Maker Bot")
+st.markdown("*Automated trading across multiple exchanges with real-time monitoring*")
 
-# SECTION 1: CEX PRICES (PUBLIC - NO KEYS NEEDED)
-st.markdown('<div class="section-header">📊 Live CEX Prices (Public Data)</div>', unsafe_allow_html=True)
+# SECTION 1: LIVE PRICES (DEX + ALL CEX)
+st.markdown('<div class="section-header">💰 Live Market Prices</div>', unsafe_allow_html=True)
 
-with st.spinner("Fetching CEX prices..."):
+with st.spinner("Fetching live prices..."):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    # Fetch DEX price
+    dex_price = loop.run_until_complete(fetch_dex_price())
+    if dex_price:
+        st.session_state.dex_price = dex_price
+
+    # Fetch all CEX prices
     exchanges = ['mexc', 'gateio', 'bitmart', 'ascendex', 'bingx']
     for ex in exchanges:
         trading_pair = 'LANDSHARE/USDT' if ex == 'gateio' else 'LAND/USDT'
@@ -351,75 +392,118 @@ with st.spinner("Fetching CEX prices..."):
 
     loop.close()
 
-col1, col2, col3, col4, col5 = st.columns(5)
-with col1:
-    price = st.session_state.cex_prices.get('mexc')
-    st.metric("MEXC", f"${price:.6f}" if price else "N/A")
-with col2:
-    price = st.session_state.cex_prices.get('gateio')
-    st.metric("Gate.io", f"${price:.6f}" if price else "N/A")
-with col3:
-    price = st.session_state.cex_prices.get('bitmart')
-    st.metric("BitMart", f"${price:.6f}" if price else "N/A")
-with col4:
-    price = st.session_state.cex_prices.get('ascendex')
-    st.metric("AscendEX", f"${price:.6f}" if price else "N/A")
-with col5:
-    price = st.session_state.cex_prices.get('bingx')
-    st.metric("BingX", f"${price:.6f}" if price else "N/A")
+# Display prices in a clean grid
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
-# SECTION 2: EXCHANGE CONFIGURATION
-st.markdown('<div class="section-header">🔧 Exchange Configuration</div>', unsafe_allow_html=True)
+with col1:
+    if st.session_state.dex_price:
+        st.metric("🥞 DEX (PancakeSwap)", f"${st.session_state.dex_price:.6f}", help="Live price from PancakeSwap DEX")
+    else:
+        st.metric("🥞 DEX", "Loading...")
+
+with col2:
+    price = st.session_state.cex_prices.get('mexc')
+    st.metric("MEXC", f"${price:.6f}" if price else "N/A", help="MEXC exchange price")
+
+with col3:
+    price = st.session_state.cex_prices.get('gateio')
+    st.metric("Gate.io", f"${price:.6f}" if price else "N/A", help="Gate.io exchange price")
+
+with col4:
+    price = st.session_state.cex_prices.get('bitmart')
+    st.metric("BitMart", f"${price:.6f}" if price else "N/A", help="BitMart exchange price")
+
+with col5:
+    price = st.session_state.cex_prices.get('ascendex')
+    st.metric("AscendEX", f"${price:.6f}" if price else "N/A", help="AscendEX exchange price")
+
+with col6:
+    price = st.session_state.cex_prices.get('bingx')
+    st.metric("BingX", f"${price:.6f}" if price else "N/A", help="BingX exchange price")
+
+# SECTION 2: EXCHANGE MANAGEMENT
+st.markdown('<div class="section-header">🔧 Exchange Management</div>', unsafe_allow_html=True)
 
 saved_exchanges = get_all_saved_exchanges()
 
-col_sel, col_add = st.columns([3, 1])
-with col_sel:
+# Display connected exchanges as badges
+if saved_exchanges:
+    st.markdown("**Connected Exchanges:**")
+    badge_html = ""
+    for ex in saved_exchanges:
+        badge_html += f'<span class="exchange-badge badge-connected">{ex.upper()} ✓</span>'
+    st.markdown(badge_html, unsafe_allow_html=True)
+    st.markdown("")
+
+col_select, col_add_btn = st.columns([4, 1])
+
+with col_select:
     if saved_exchanges:
         selected_exchange = st.selectbox(
-            "Select Exchange",
+            "🎯 Active Trading Exchange",
             options=saved_exchanges,
-            format_func=lambda x: {'mexc': 'MEXC', 'gateio': 'Gate.io', 'bitmart': 'BitMart', 'ascendex': 'AscendEX', 'bingx': 'BingX'}.get(x, x.upper())
+            format_func=lambda x: {'mexc': 'MEXC Global', 'gateio': 'Gate.io', 'bitmart': 'BitMart', 'ascendex': 'AscendEX', 'bingx': 'BingX'}.get(x, x.upper()),
+            key="exchange_selector"
         )
         st.session_state.bot_config['selected_exchange'] = selected_exchange
     else:
-        st.info("No exchanges configured")
+        st.info("💡 No exchanges configured yet. Click 'Add Exchange' to get started!")
         st.session_state.bot_config['selected_exchange'] = None
 
-with col_add:
+with col_add_btn:
     st.markdown("<br>", unsafe_allow_html=True)
-    add_new = st.button("➕ Add Exchange", use_container_width=True)
+    add_new = st.button("➕ Add Exchange", use_container_width=True, type="primary")
 
-# Add Exchange Form
+# Add Exchange Form (cleaner design)
 if add_new or not saved_exchanges:
-    st.markdown("#### Add New Exchange")
-    with st.form("add_exchange_form"):
-        new_ex = st.selectbox("Exchange", ['mexc', 'gateio', 'bitmart', 'ascendex', 'bingx'],
-                               format_func=lambda x: {'mexc': 'MEXC', 'gateio': 'Gate.io', 'bitmart': 'BitMart', 'ascendex': 'AscendEX', 'bingx': 'BingX'}[x])
+    st.markdown("---")
+    st.markdown("### ➕ Add New Exchange")
 
-        api_key = st.text_input("API Key", type="password")
-        api_secret = st.text_input("Secret Key", type="password")
+    with st.form("add_exchange_form", clear_on_submit=True):
+        col_ex, col_key, col_secret = st.columns(3)
 
-        # Exchange-specific fields
+        with col_ex:
+            new_ex = st.selectbox(
+                "Select Exchange",
+                ['mexc', 'gateio', 'bitmart', 'ascendex', 'bingx'],
+                format_func=lambda x: {'mexc': 'MEXC', 'gateio': 'Gate.io', 'bitmart': 'BitMart', 'ascendex': 'AscendEX', 'bingx': 'BingX'}[x]
+            )
+
+        with col_key:
+            api_key = st.text_input("🔑 API Key", type="password", placeholder="Enter API key")
+
+        with col_secret:
+            api_secret = st.text_input("🔐 Secret Key", type="password", placeholder="Enter secret key")
+
+        # Exchange-specific fields in a second row
+        col_extra1, col_extra2, col_extra3 = st.columns(3)
+
         api_password, api_uid, api_memo, api_group_id = None, None, None, None
 
         if new_ex == 'gateio':
-            api_password = st.text_input("Password (optional)", type="password")
+            with col_extra1:
+                api_password = st.text_input("🔒 Password (optional)", type="password", placeholder="API password")
         elif new_ex == 'bitmart':
-            api_uid = st.text_input("UID")
-            api_memo = st.text_input("Memo", type="password")
+            with col_extra1:
+                api_uid = st.text_input("👤 UID", placeholder="Your BitMart UID")
+            with col_extra2:
+                api_memo = st.text_input("📝 Memo", type="password", placeholder="API memo")
         elif new_ex == 'ascendex':
-            api_group_id = st.text_input("Group ID")
+            with col_extra1:
+                api_group_id = st.text_input("🏢 Group ID", placeholder="Your group ID")
 
-        connect_btn = st.form_submit_button("Connect & Save", use_container_width=True)
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
+        with col_btn1:
+            connect_btn = st.form_submit_button("✅ Connect & Save", use_container_width=True, type="primary")
 
         if connect_btn:
+            # Validation
             if not api_key or not api_secret:
-                st.error("API Key and Secret required")
+                st.error("❌ API Key and Secret are required")
             elif new_ex == 'bitmart' and (not api_uid or not api_memo):
-                st.error("UID and Memo required for BitMart")
+                st.error("❌ BitMart requires UID and Memo")
             elif new_ex == 'ascendex' and not api_group_id:
-                st.error("Group ID required for AscendEX")
+                st.error("❌ AscendEX requires Group ID")
             else:
                 credentials = {'api_key': api_key, 'secret': api_secret}
                 if api_password:
@@ -431,7 +515,7 @@ if add_new or not saved_exchanges:
                 if api_group_id:
                     credentials['group_id'] = api_group_id
 
-                with st.spinner("Testing connection..."):
+                with st.spinner(f"🔄 Testing connection to {new_ex.upper()}..."):
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     portfolio = loop.run_until_complete(fetch_portfolio(new_ex, credentials))
@@ -439,11 +523,11 @@ if add_new or not saved_exchanges:
 
                     if portfolio is not None:
                         save_cex_credentials(new_ex, credentials)
-                        st.success(f"✅ Connected to {new_ex.upper()}!")
+                        st.success(f"✅ Successfully connected to {new_ex.upper()}!")
                         st.session_state.portfolio_data = portfolio
                         st.rerun()
                     else:
-                        st.error("❌ Connection failed")
+                        st.error("❌ Connection failed. Please check your credentials.")
 
 # SECTION 3: PORTFOLIO
 if st.session_state.bot_config['selected_exchange']:
@@ -452,7 +536,7 @@ if st.session_state.bot_config['selected_exchange']:
     if st.button("🔄 Refresh Portfolio", use_container_width=True):
         credentials = load_cex_credentials(st.session_state.bot_config['selected_exchange'])
 
-        with st.spinner("Fetching portfolio..."):
+        with st.spinner(f"Fetching portfolio from {st.session_state.bot_config['selected_exchange'].upper()}..."):
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             portfolio = loop.run_until_complete(fetch_portfolio(st.session_state.bot_config['selected_exchange'], credentials))
@@ -460,12 +544,11 @@ if st.session_state.bot_config['selected_exchange']:
 
             if portfolio:
                 st.session_state.portfolio_data = portfolio
+                st.success(f"✅ Portfolio refreshed from {st.session_state.bot_config['selected_exchange'].upper()}")
             else:
-                st.error("Failed to fetch portfolio")
+                st.error("❌ Failed to fetch portfolio")
 
     if st.session_state.portfolio_data:
-        st.success(f"✅ Connected to {st.session_state.bot_config['selected_exchange'].upper()}")
-
         portfolio_list = []
         for currency, amounts in st.session_state.portfolio_data.items():
             portfolio_list.append({
@@ -479,29 +562,34 @@ if st.session_state.bot_config['selected_exchange']:
         st.dataframe(df_portfolio, use_container_width=True, hide_index=True)
 
 # SECTION 4: TRADING CONFIGURATION
-st.markdown('<div class="section-header">⚙️ Trading Parameters</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-header">⚙️ Trading Configuration</div>', unsafe_allow_html=True)
 
 col_ref, col_spread, col_amount = st.columns(3)
 
 with col_ref:
-    ref_mode = st.radio("Reference Mode", ['dex', 'cex'],
-                        format_func=lambda x: 'DEX (Immediate)' if x == 'dex' else 'CEX (2min delay)',
-                        horizontal=True)
+    ref_mode = st.radio(
+        "📍 Reference Price Mode",
+        ['dex', 'cex'],
+        format_func=lambda x: '🥞 DEX (Immediate)' if x == 'dex' else '🏦 CEX (2min delay)',
+        horizontal=True
+    )
     st.session_state.bot_config['reference_mode'] = ref_mode
 
 with col_spread:
-    spread = st.number_input("Spread %", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
+    spread = st.number_input("📊 Spread %", min_value=0.1, max_value=10.0, value=1.5, step=0.1)
     st.session_state.bot_config['spread_percentage'] = spread
 
 with col_amount:
-    amount = st.number_input("Order Amount $", min_value=10, max_value=10000, value=1000, step=100)
+    amount = st.number_input("💵 Order Amount $", min_value=10, max_value=10000, value=1000, step=100)
     st.session_state.bot_config['order_amount_usd'] = amount
 
 # Bot Control
+st.markdown("")
 col_start, col_stop = st.columns(2)
+
 with col_start:
     start_disabled = st.session_state.bot_running or not st.session_state.bot_config['selected_exchange']
-    if st.button("🚀 Start Bot", type="primary", disabled=start_disabled, use_container_width=True):
+    if st.button("🚀 Start Trading Bot", type="primary", disabled=start_disabled, use_container_width=True):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         success = loop.run_until_complete(initialize_bot())
@@ -509,33 +597,24 @@ with col_start:
 
         if success:
             st.session_state.bot_running = True
-            st.success("Bot started!")
+            st.success("✅ Bot started successfully!")
             st.rerun()
         else:
-            st.error("Failed to start")
+            st.error("❌ Failed to start bot")
 
 with col_stop:
-    if st.button("🛑 Stop Bot", type="secondary", disabled=not st.session_state.bot_running, use_container_width=True):
+    if st.button("🛑 Stop Trading Bot", type="secondary", disabled=not st.session_state.bot_running, use_container_width=True):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(shutdown_bot())
         loop.close()
 
         st.session_state.bot_running = False
-        st.info("Bot stopped")
+        st.info("⏹️ Bot stopped")
         st.rerun()
 
 # SECTION 5: LIVE TRADING
-st.markdown('<div class="section-header">📈 Live Trading</div>', unsafe_allow_html=True)
-
-# Fetch DEX price
-with st.spinner("Fetching prices..."):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    dex_price = loop.run_until_complete(fetch_dex_price())
-    if dex_price:
-        st.session_state.dex_price = dex_price
-    loop.close()
+st.markdown('<div class="section-header">📈 Live Trading Monitor</div>', unsafe_allow_html=True)
 
 # Get CEX price for selected exchange
 cex_price = None
@@ -543,14 +622,18 @@ if st.session_state.bot_config['selected_exchange']:
     cex_price = st.session_state.cex_prices.get(st.session_state.bot_config['selected_exchange'])
 
 col1, col2, col3, col4 = st.columns(4)
+
 with col1:
-    st.metric("DEX Price", f"${st.session_state.dex_price:.6f}" if st.session_state.dex_price else "N/A")
+    st.metric("🥞 DEX Price", f"${st.session_state.dex_price:.6f}" if st.session_state.dex_price else "N/A")
 with col2:
-    st.metric("CEX Price", f"${cex_price:.6f}" if cex_price else "N/A")
+    if st.session_state.bot_config['selected_exchange']:
+        st.metric(f"🏦 {st.session_state.bot_config['selected_exchange'].upper()} Price", f"${cex_price:.6f}" if cex_price else "N/A")
+    else:
+        st.metric("CEX Price", "Select exchange")
 with col3:
     if st.session_state.dex_price and cex_price:
         div = abs(st.session_state.dex_price - cex_price) / st.session_state.dex_price
-        st.metric("Divergence", f"{div:.2%}")
+        st.metric("📊 Divergence", f"{div:.2%}")
     else:
         st.metric("Divergence", "N/A")
 with col4:
@@ -558,7 +641,7 @@ with col4:
     if ref_price:
         buy_p = ref_price * (1 - spread / 100)
         sell_p = ref_price * (1 + spread / 100)
-        st.metric("Order Range", f"${buy_p:.6f} - ${sell_p:.6f}")
+        st.metric("🎯 Order Range", f"${buy_p:.6f} - ${sell_p:.6f}")
     else:
         st.metric("Order Range", "N/A")
 
@@ -586,17 +669,21 @@ if st.session_state.bot_running:
         df_orders = pd.DataFrame(orders_data)
         st.dataframe(df_orders, use_container_width=True, hide_index=True)
     else:
-        st.warning("No active orders")
+        st.info("⏳ Waiting for orders...")
 else:
-    st.info("Start the bot to place orders")
+    st.info("💡 Start the bot to begin placing orders")
 
 # Logs
 st.markdown("#### 📝 Bot Logs")
 if st.session_state.bot_logs:
-    for log in reversed(st.session_state.bot_logs[-15:]):
-        st.text(log)
+    log_text = "\n".join(reversed(st.session_state.bot_logs[-15:]))
+    st.text_area("", value=log_text, height=200, disabled=True)
 else:
     st.info("No logs yet")
+
+# Footer
+st.markdown("---")
+st.caption(f"⏰ Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 🔄 Auto-refresh: {'ON' if st.session_state.bot_running else 'OFF'}")
 
 # Auto-refresh
 import time
