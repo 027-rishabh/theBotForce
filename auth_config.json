@@ -1,0 +1,9 @@
+{
+  "users": {
+    "admin": {
+      "password": "admin123",
+      "role": "admin"
+    }
+  },
+  "cex_credentials": {}
+}
