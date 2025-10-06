@@ -3,6 +3,10 @@
     "admin": {
       "password": "admin123",
       "role": "admin"
+    },
+    "abc": {
+      "password": "abc123",
+      "role": "user"
     }
   },
   "cex_credentials": {}

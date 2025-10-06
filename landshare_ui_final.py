@@ -92,6 +92,31 @@ def verify_login(username, password):
             return True
     return False
 
+def register_user(username, password, role='user'):
+    """Register a new user"""
+    auth_config = load_json_config(AUTH_CONFIG_FILE)
+    if 'users' not in auth_config:
+        auth_config['users'] = {}
+
+    # Check if user already exists
+    if username in auth_config['users']:
+        return False, "Username already exists"
+
+    # Validate username and password
+    if len(username) < 3:
+        return False, "Username must be at least 3 characters"
+    if len(password) < 6:
+        return False, "Password must be at least 6 characters"
+
+    # Add new user
+    auth_config['users'][username] = {
+        'password': password,
+        'role': role
+    }
+
+    save_json_config(AUTH_CONFIG_FILE, auth_config)
+    return True, "Registration successful"
+
 def save_cex_credentials(exchange_name, credentials):
     config = load_json_config(CEX_CONFIG_FILE)
     if 'exchanges' not in config:
@@ -113,25 +138,59 @@ if 'authenticated' not in st.session_state:
 if 'username' not in st.session_state:
     st.session_state.username = None
 
-# Login
+# Login/Signup
 if not st.session_state.authenticated:
     st.markdown("<h1 style='text-align: center;'>🔐 LANDSHARE Market Maker</h1>", unsafe_allow_html=True)
+
+    # Initialize auth mode in session state
+    if 'auth_mode' not in st.session_state:
+        st.session_state.auth_mode = 'login'
+
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<div style='background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>", unsafe_allow_html=True)
-        with st.form("login_form"):
-            st.markdown("### Please Login")
-            username = st.text_input("Username", placeholder="Enter username")
-            password = st.text_input("Password", type="password", placeholder="Enter password")
-            submit = st.form_submit_button("🚀 Login", use_container_width=True)
-            if submit:
-                if verify_login(username, password):
-                    st.session_state.authenticated = True
-                    st.session_state.username = username
-                    st.success("✅ Login successful!")
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid credentials")
+
+        # Toggle between Login and Signup
+        tab1, tab2 = st.tabs(["🔑 Login", "📝 Sign Up"])
+
+        with tab1:
+            with st.form("login_form"):
+                st.markdown("### Welcome Back!")
+                username = st.text_input("Username", placeholder="Enter username", key="login_user")
+                password = st.text_input("Password", type="password", placeholder="Enter password", key="login_pass")
+                submit = st.form_submit_button("🚀 Login", use_container_width=True)
+                if submit:
+                    if verify_login(username, password):
+                        st.session_state.authenticated = True
+                        st.session_state.username = username
+                        st.success("✅ Login successful!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid credentials")
+
+        with tab2:
+            with st.form("signup_form"):
+                st.markdown("### Create Account")
+                new_username = st.text_input("Username", placeholder="Choose a username (min 3 chars)", key="signup_user")
+                new_password = st.text_input("Password", type="password", placeholder="Choose a password (min 6 chars)", key="signup_pass")
+                confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm your password", key="signup_confirm")
+
+                signup_submit = st.form_submit_button("✨ Create Account", use_container_width=True)
+
+                if signup_submit:
+                    # Validate inputs
+                    if not new_username or not new_password:
+                        st.error("❌ Please fill in all fields")
+                    elif new_password != confirm_password:
+                        st.error("❌ Passwords do not match")
+                    else:
+                        success, message = register_user(new_username, new_password)
+                        if success:
+                            st.success(f"✅ {message}! Please login.")
+                            st.balloons()
+                        else:
+                            st.error(f"❌ {message}")
+
         st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
@@ -176,27 +235,78 @@ async def fetch_dex_price():
         logging.error(f"DEX price error: {e}")
         return None
 
+async def fetch_cex_price_from_coingecko(exchange_name):
+    """Fallback to CoinGecko for exchange-specific price"""
+    import aiohttp
+    try:
+        # Map exchange names to CoinGecko market names
+        coingecko_markets = {
+            'mexc': 'MEXC',
+            'gateio': 'Gate',
+            'bitmart': 'BitMart',
+            'ascendex': 'AscendEX (BitMax)',
+            'bingx': 'BingX'
+        }
+
+        market_name = coingecko_markets.get(exchange_name)
+        if not market_name:
+            return None
+
+        async with aiohttp.ClientSession() as session:
+            url = "https://api.coingecko.com/api/v3/coins/landshare/tickers"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    tickers = data.get('tickers', [])
+
+                    # Find the ticker for this exchange
+                    for ticker in tickers:
+                        if ticker.get('market', {}).get('name') == market_name:
+                            price = ticker.get('last')
+                            if price:
+                                logging.info(f"CoinGecko: {exchange_name} price = ${price}")
+                                return float(price)
+        return None
+    except Exception as e:
+        logging.error(f"CoinGecko fallback error for {exchange_name}: {e}")
+        return None
+
 async def fetch_cex_price(exchange_name, trading_pair='LAND/USDT'):
     try:
+        # Standard CCXT approach first
         exchange_class = getattr(ccxt, exchange_name)
         exchange = exchange_class({'enableRateLimit': True})
         await exchange.load_markets()
 
         # Try different pair formats
-        pairs_to_try = [trading_pair, 'LANDSHARE/USDT', 'LAND/USD', 'LAND/USDC']
+        pairs_to_try = [trading_pair, 'LANDSHARE/USDT', 'LAND/USD', 'LAND/USDC', 'LAND/BUSD']
         ticker = None
 
         for pair in pairs_to_try:
             if pair in exchange.markets:
-                ticker = await exchange.fetch_ticker(pair)
-                break
+                try:
+                    ticker = await exchange.fetch_ticker(pair)
+                    if ticker and 'last' in ticker:
+                        break
+                except:
+                    continue
 
         cex_price = ticker['last'] if ticker and 'last' in ticker else None
         await exchange.close()
+
+        # If CCXT failed, try CoinGecko as fallback
+        if cex_price is None:
+            logging.info(f"{exchange_name} - CCXT failed, trying CoinGecko fallback...")
+            cex_price = await fetch_cex_price_from_coingecko(exchange_name)
+
+        if cex_price is None:
+            logging.warning(f"{exchange_name} - Price not available from any source")
+
         return cex_price
     except Exception as e:
-        logging.error(f"{exchange_name} price error: {e}")
-        return None
+        logging.error(f"{exchange_name} CCXT error: {e}, trying CoinGecko...")
+        # Try CoinGecko on exception
+        return await fetch_cex_price_from_coingecko(exchange_name)
 
 async def fetch_portfolio(exchange_name, credentials):
     try:
@@ -247,7 +357,8 @@ def add_log(message):
 def create_bot_config():
     exchange_name = st.session_state.bot_config['selected_exchange']
     credentials = load_cex_credentials(exchange_name)
-    trading_pair = 'LANDSHARE/USDT' if exchange_name == 'gateio' else 'LAND/USDT'
+    # MEXC and Gate.io use LANDSHARE/USDT
+    trading_pair = 'LANDSHARE/USDT' if exchange_name in ['mexc', 'gateio'] else 'LAND/USDT'
 
     config = {
         'token': {'symbol': 'LAND', 'trading_pair': trading_pair, 'contract_address': '0x9d986A3f147212327DD658F712d5264a73a1fdB0', 'blockchain': 'BSC'},
@@ -343,6 +454,32 @@ async def shutdown_bot():
     except Exception as e:
         add_log(f"❌ Shutdown error: {str(e)}")
 
+# Fetch prices first (before sidebar rendering)
+if 'price_fetch_counter' not in st.session_state:
+    st.session_state.price_fetch_counter = 0
+
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
+# Fetch DEX price
+dex_price = loop.run_until_complete(fetch_dex_price())
+if dex_price:
+    st.session_state.dex_price = dex_price
+
+# Fetch all CEX prices
+exchanges = ['mexc', 'gateio', 'bitmart', 'ascendex', 'bingx']
+for ex in exchanges:
+    # MEXC and Gate.io use LANDSHARE/USDT
+    if ex in ['mexc', 'gateio']:
+        trading_pair = 'LANDSHARE/USDT'
+    else:
+        trading_pair = 'LAND/USDT'
+    price = loop.run_until_complete(fetch_cex_price(ex, trading_pair))
+    st.session_state.cex_prices[ex] = price
+
+loop.close()
+st.session_state.price_fetch_counter += 1
+
 # Sidebar
 with st.sidebar:
     st.markdown(f"### 👤 {st.session_state.username}")
@@ -360,8 +497,29 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 📊 Quick Stats")
 
+    # Show DEX price
     if st.session_state.dex_price:
-        st.metric("DEX Price", f"${st.session_state.dex_price:.6f}")
+        st.metric("🥞 DEX", f"${st.session_state.dex_price:.6f}")
+
+    # Show all CEX prices
+    st.markdown("**💰 Live Market Prices**")
+
+    for ex_name in ['mexc', 'gateio', 'bitmart', 'ascendex', 'bingx']:
+        price = st.session_state.cex_prices.get(ex_name)
+        ex_display = {
+            'mexc': 'MEXC',
+            'gateio': 'Gate.io',
+            'bitmart': 'BitMart',
+            'ascendex': 'AscendEX',
+            'bingx': 'BingX'
+        }[ex_name]
+
+        if price:
+            st.metric(ex_display, f"${price:.6f}")
+        else:
+            st.metric(ex_display, "N/A")
+
+    st.markdown("---")
 
     saved = get_all_saved_exchanges()
     if saved:
@@ -371,57 +529,7 @@ with st.sidebar:
 st.title("📈 LANDSHARE Market Maker Bot")
 st.markdown("*Automated trading across multiple exchanges with real-time monitoring*")
 
-# SECTION 1: LIVE PRICES (DEX + ALL CEX)
-st.markdown('<div class="section-header">💰 Live Market Prices</div>', unsafe_allow_html=True)
-
-with st.spinner("Fetching live prices..."):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    # Fetch DEX price
-    dex_price = loop.run_until_complete(fetch_dex_price())
-    if dex_price:
-        st.session_state.dex_price = dex_price
-
-    # Fetch all CEX prices
-    exchanges = ['mexc', 'gateio', 'bitmart', 'ascendex', 'bingx']
-    for ex in exchanges:
-        trading_pair = 'LANDSHARE/USDT' if ex == 'gateio' else 'LAND/USDT'
-        price = loop.run_until_complete(fetch_cex_price(ex, trading_pair))
-        st.session_state.cex_prices[ex] = price
-
-    loop.close()
-
-# Display prices in a clean grid
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-
-with col1:
-    if st.session_state.dex_price:
-        st.metric("🥞 DEX (PancakeSwap)", f"${st.session_state.dex_price:.6f}", help="Live price from PancakeSwap DEX")
-    else:
-        st.metric("🥞 DEX", "Loading...")
-
-with col2:
-    price = st.session_state.cex_prices.get('mexc')
-    st.metric("MEXC", f"${price:.6f}" if price else "N/A", help="MEXC exchange price")
-
-with col3:
-    price = st.session_state.cex_prices.get('gateio')
-    st.metric("Gate.io", f"${price:.6f}" if price else "N/A", help="Gate.io exchange price")
-
-with col4:
-    price = st.session_state.cex_prices.get('bitmart')
-    st.metric("BitMart", f"${price:.6f}" if price else "N/A", help="BitMart exchange price")
-
-with col5:
-    price = st.session_state.cex_prices.get('ascendex')
-    st.metric("AscendEX", f"${price:.6f}" if price else "N/A", help="AscendEX exchange price")
-
-with col6:
-    price = st.session_state.cex_prices.get('bingx')
-    st.metric("BingX", f"${price:.6f}" if price else "N/A", help="BingX exchange price")
-
-# SECTION 2: EXCHANGE MANAGEMENT
+# SECTION 1: EXCHANGE MANAGEMENT
 st.markdown('<div class="section-header">🔧 Exchange Management</div>', unsafe_allow_html=True)
 
 saved_exchanges = get_all_saved_exchanges()
@@ -683,12 +791,18 @@ else:
 
 # Footer
 st.markdown("---")
-st.caption(f"⏰ Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 🔄 Auto-refresh: {'ON' if st.session_state.bot_running else 'OFF'}")
+col_footer1, col_footer2, col_footer3 = st.columns([2, 1, 1])
+with col_footer1:
+    st.caption(f"⏰ Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+with col_footer2:
+    if st.button("🔄 Refresh Data", use_container_width=True):
+        st.rerun()
+with col_footer3:
+    # Auto-refresh toggle
+    auto_refresh = st.checkbox("Auto-refresh", value=False, help="Auto-refresh every 10 seconds")
 
-# Auto-refresh
-import time
-if st.session_state.bot_running:
-    time.sleep(st.session_state.dynamic_interval)
-else:
-    time.sleep(5)
-st.rerun()
+# Auto-refresh with fragment to prevent overlay
+if auto_refresh:
+    import time
+    time.sleep(10)
+    st.rerun()
